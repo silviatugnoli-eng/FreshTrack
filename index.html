@@ -438,26 +438,47 @@ header {
 // PROFILI — chiavi ft2_* per non collidere
 // con diario-alimentare o versioni vecchie
 // ══════════════════════════════════════════
-const LS_PROFILES = 'ft2_profiles';
-const LS_ACTIVE   = 'ft2_active_profile';
+const LS_PROFILES = 'freshtrack_app_profiles';
+const LS_ACTIVE   = 'freshtrack_app_active';
 const AV_COLORS   = ['av-0','av-1','av-2','av-3','av-4','av-5','av-6','av-7'];
 
 const getProfiles  = ()  => JSON.parse(localStorage.getItem(LS_PROFILES) || '[]');
 const saveProfiles = arr => localStorage.setItem(LS_PROFILES, JSON.stringify(arr));
 const getActiveId  = ()  => localStorage.getItem(LS_ACTIVE) || null;
 const setActiveId  = id  => localStorage.setItem(LS_ACTIVE, id);
-const prodKey      = id  => 'ft2_products_' + id;
+const prodKey      = id  => 'freshtrack_app_products_' + id;
 const uid          = ()  => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 
-// Migra vecchi dati (chiave originale freshtrack_products)
+// Migrazione automatica — porta i dati da versioni precedenti senza perderli
 ;(function migrate() {
-  const old = localStorage.getItem('freshtrack_products');
-  if (!old || old === '[]') return;
-  if (getProfiles().length > 0) return;
-  const id = uid();
-  saveProfiles([{ id, name: 'Io', avatarColor: 'av-0', createdAt: new Date().toISOString() }]);
-  localStorage.setItem(prodKey(id), old);
-  localStorage.removeItem('freshtrack_products');
+  if (localStorage.getItem(LS_PROFILES)) return; // già aggiornato, niente da fare
+
+  // Caso 1: esistono profili ft2_* (versione precedente) → rinomina le chiavi
+  const oldProfilesRaw = localStorage.getItem('ft2_profiles');
+  if (oldProfilesRaw && oldProfilesRaw !== '[]') {
+    const profiles = JSON.parse(oldProfilesRaw);
+    profiles.forEach(p => {
+      const data = localStorage.getItem('ft2_products_' + p.id);
+      if (data) {
+        localStorage.setItem(prodKey(p.id), data);
+        localStorage.removeItem('ft2_products_' + p.id);
+      }
+    });
+    localStorage.setItem(LS_PROFILES, oldProfilesRaw);
+    const oldActive = localStorage.getItem('ft2_active_profile');
+    if (oldActive) { localStorage.setItem(LS_ACTIVE, oldActive); localStorage.removeItem('ft2_active_profile'); }
+    localStorage.removeItem('ft2_profiles');
+    return;
+  }
+
+  // Caso 2: solo freshtrack_products (versione originale senza profili)
+  const oldSingle = localStorage.getItem('freshtrack_products');
+  if (oldSingle && oldSingle !== '[]') {
+    const id = uid();
+    saveProfiles([{ id, name: 'Io', avatarColor: 'av-0', createdAt: new Date().toISOString() }]);
+    localStorage.setItem(prodKey(id), oldSingle);
+    localStorage.removeItem('freshtrack_products');
+  }
 })();
 
 function renderProfileScreen() {
@@ -501,8 +522,18 @@ function createProfile() {
   const input = document.getElementById('new-profile-name');
   const name  = input.value.trim();
   if (!name) { input.focus(); return; }
+
   const profiles = getProfiles();
-  const id       = uid();
+  // Se esiste gia' un profilo con questo nome (case-insensitive) lo seleziona
+  const existing = profiles.find(p => p.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    input.value = '';
+    selectProfile(existing.id);
+    return;
+  }
+
+  // Altrimenti crea un profilo nuovo
+  const id = uid();
   profiles.push({ id, name, avatarColor: AV_COLORS[profiles.length % AV_COLORS.length], createdAt: new Date().toISOString() });
   saveProfiles(profiles);
   input.value = '';
